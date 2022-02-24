@@ -8,10 +8,14 @@ turtles-own ; ADDED
  share-information? ; Same for true information
  belief-information ; Same for true information
  su-neighbours
- mis-exposed?
- true-exposed?
+ holding-mis?
+ holding-true?
  for-topic
  initial-diffusers?
+ shared-mis
+ shared-true
+ pb ;; probability of believing
+
 ]
 
 
@@ -130,41 +134,39 @@ to setup ; ADDED
     set share-information?  false
 
   ]
+  set-agent-properties
   setup-agents
-;;  set-agent-properties
-;;  initialise-diffusion
+  initialise-diffusion
   reset-ticks
 end
 
 to go
-;;  if ticks = 1500
-;;    [ stop ]
-  believe-and-share-model-true
+  initialise-diffusion
   believe-and-share-model-mis
+  believe-and-share-model-true
 
-  if (ticks mod 5 = 0) [
-    ask turtles [
-      set perceived-knowledge perceived-knowledge - 3
-      set factual-knowledge factual-knowledge - 3
-    ]
+  ask turtles [
+   set perceived-knowledge (perceived-knowledge - 0.0005)
+   set factual-knowledge (factual-knowledge - 0.0005)
+
+    if holding-mis? = false and holding-true? = false [ set color blue ]
+
   ]
+
   tick
 end
 
-;;
-;; CHANGE THIS TO USE PREFERENCIAL ATTATCHEMENT NODES
-;;
 to setup-agents ; ADDED
   ask n-of media-agents turtles
   [
     let x random 2
     (ifelse
       x = 0 [; Malicious news agent
-        set share-misinformation? true
+        set holding-mis? true
         set color red
       ]
       x = 1 [
-        set share-information? true
+        set holding-true? true
         set color green
       ]
       [
@@ -176,63 +178,16 @@ end
 to set-agent-properties
   ask turtles
   [
-   let flip-coin random 100
-   if flip-coin < 11 ; High knowledge & high or low perceived knowledge
-    [
-      let x random 2
-      set factual-knowledge 90
-      if x = 1
-      [
-        set perceived-knowledge 90
-      ]
-      if x = 0
-      [
-        set perceived-knowledge 10
-      ]
-    ]
-   if flip-coin > 10 and flip-coin < 40 ; Medium to high factual and medium to low perceived
-    [
-     set factual-knowledge 60
-     set perceived-knowledge 40
-    ]
-
-   if flip-coin > 40 and flip-coin < 60 ; Low factual low perceived
-    [
-     set factual-knowledge 20
-     set perceived-knowledge 20
-    ]
-   if flip-coin > 60 and flip-coin < 80 ; Med to low factual and med to high perceived
-    [
-     set factual-knowledge 40
-     set perceived-knowledge 60
-    ]
-   if flip-coin > 80; High perceived low factual
-    [
-     set factual-knowledge 10
-     set perceived-knowledge 90
-    ]
-
+    set perceived-knowledge (random 100) / 100 ;; Initialise randomly to some value
+    set factual-knowledge (random 100) / 100 ;; Initialise randomly to some value
     set share-misinformation? false
     set share-information? false
-    set true-exposed? false
-    set mis-exposed? false
-
-    let fc random 3 ;; Half should be for the topic and half should not
-
-    if fc = 0 [
-      set for-topic 0
-      set belief-information 0
-      set belief-misinformation 0
-    ] ;; Undecided
-    if fc = 1 [
-      set for-topic 1
-      set belief-information 500
-    ] ;; For
-    if fc = 2 [
-      set for-topic 2
-      set belief-misinformation 500
-    ] ;; Against
-
+    set holding-mis? false
+    set holding-true? false
+  ]
+  ask n-of high-p-low-f turtles [
+    set factual-knowledge (random 30) / 100
+    set perceived-knowledge ((random 30) + 70) / 100
   ]
 end
 
@@ -245,13 +200,13 @@ to initialise-diffusion ; Ask all su breed agents if they are neighbours with a 
       if media-distribution = 0 ; News agent exposing neighbors to credible information
       [
         ask in-link-neighbors [
-          set true-exposed? true
+          set holding-true? true
         ]
       ]
       if media-distribution = 1 ; News agent exposing neighbors to misinformation
       [
         ask in-link-neighbors [
-          set mis-exposed? true
+          set holding-mis? true
         ]
 
       ]
@@ -260,267 +215,70 @@ to initialise-diffusion ; Ask all su breed agents if they are neighbours with a 
 end
 
 to believe-and-share-model-mis ;; We assume that you only share some information once.
-  ask turtles
-  [
-    if share-misinformation? = false and count ( in-link-neighbors with [ share-misinformation? = true ] ) > 0; ;; This agent is somewhat exposed to misinformation
-    [
-      set mis-exposed? true
-      let exposed count ( in-link-neighbors with [ share-misinformation? = true ] )
 
-      ;; Now either the agent will just share (behavioural reaction) or they will increase belief and then share (cognitive followed by behavioural reaction)
+  ask turtles [
 
-      ;; Share (path 3) -> As described in the literature their is a possibility that a user may simply share some information without increasing belief in the topic
-      ;; The sharing model says this is due to 1. Risk factors and 2. Exposure to misinformation
-      ;; To share misinformation without increasing belief in the topic one must be:
-      ;; Undecided & low factual and perceived knowledge
-      let coin random 1000
-;      (ifelse
-;        perceived-knowledge < 20 and factual-knowledge < 20 and for-topic = 0 and (coin - exposed) <= 100 [ ;; Low perceived & Factual knowledge & Undecided
-;         set share-misinformation? true ;; 20% Chance of this category of person sharing without considering belief.
-;         set color red
-;        ]
-;        perceived-knowledge >= 20 and factual-knowledge >= 20 and for-topic != 2 and (coin - exposed) <= 25 and factual-knowledge < 70[
-;          set share-misinformation? true
-;          set color red
-;;        ])
+    if holding-mis? = true and share-misinformation? = false and shared-mis < 5[
 
-      ;; Belief (Path 1) - Here we go through all possible attributes of our agents and define how this effects their beleive
-      (ifelse
-        factual-knowledge >= 90 [ ;; High knowledge and high or low perceived knowledge for or against the topic
-        set belief-misinformation (belief-misinformation - 5) ;; Reduce belief in misinformation if well informed
+      set holding-mis? false
+
+      ;; Calculate the probability of agent sharing to neighbours
+      if factual-knowledge <= 0.5 [
+
+        set belief-misinformation (factual-knowledge + (perceived-knowledge - factual-knowledge) / (factual-knowledge + perceived-knowledge))
+
+        if pb < 0 [set pb 0] ;; pb should not be less than 0 -> max(0, pb)
+
+      ]
+
+      ;; Calculate the probability of agent sharing to neighbours
+      if factual-knowledge > 0.5 [
+
+        set belief-misinformation ((1 - factual-knowledge) + (perceived-knowledge - factual-knowledge) / (factual-knowledge + perceived-knowledge))
+
+        if belief-misinformation < 0 [set pb 0] ;; pb should not be less than 0 -> max(0, pb)
+
+      ]
+
+      let coin (random 100) / 100
+
+      if coin <= belief-misinformation [ ;; By some probability the agent shares information and neighbors are now holding!
+        ask in-link-neighbors [
+          set holding-mis? true
+          set perceived-knowledge (perceived-knowledge + 0.01)
+          set shared-mis (shared-mis + 1)
+          set color red
         ]
-        perceived-knowledge < 20 and factual-knowledge < 20 [ ;; Low perceived and factual knowledge
-          (ifelse
-            for-topic = 0 [ ;; Undecided and low factual and perceived knoweldge means you may or may not share misinformation
-              if (coin - exposed) <= 500 [
-                set belief-misinformation (belief-misinformation + 5)
-                set perceived-knowledge (perceived-knowledge + 5)
-              ]
-
-              if (coin - exposed) > 500 [ ;; Person does not believe the misinformation
-                set belief-misinformation (belief-misinformation - 5)
-              ]
-            ]
-            for-topic = 2 [ ;; For topic and low factual and perceived knowledge = Slightly more likely to beleive in topic
-              if (coin - exposed) <= 550 [
-                set belief-misinformation (belief-misinformation + 5)
-                set perceived-knowledge (perceived-knowledge + 5)
-              ]
-              if (coin - exposed) > 550 [ ;; Person does not believe the misinformation
-                set belief-misinformation (belief-misinformation - 5)
-              ]
-            ]
-            for-topic = 1 [ ;; Against topic with low factual and perceived knowledge = slightly less likely to b&s however still in the middle
-              if (coin - exposed) <= 450 [
-                set belief-misinformation (belief-misinformation + 5)
-                set perceived-knowledge (perceived-knowledge + 5)
-              ]
-              if (coin - exposed) > 450 [ ;; Person does not believe the misinformation
-                set belief-misinformation (belief-misinformation - 5)
-              ]
-            ])
-        ]
-        perceived-knowledge > 90 and factual-knowledge < 20 [ ;; High perceived and low factual knowledge
-          (ifelse
-            (for-topic = 0 or for-topic = 2)[ ;; Undecided or for and high perceived and low factual
-              if (coin - exposed) <= 850 [
-                set belief-misinformation (belief-misinformation + 5)
-                set perceived-knowledge (perceived-knowledge + 5)
-              ]
-
-              if (coin - exposed) > 850 [ ;; Person does not believe the misinformation
-                set belief-misinformation (belief-misinformation - 5)
-              ]
-            ]
-            for-topic = 1 [ ;; Against and low factual and perceived knoweldge means you may or may not share misinformation. Against the topic
-              if (coin + exposed) <= 100 [
-                set belief-misinformation (belief-misinformation + 5)
-                set perceived-knowledge (perceived-knowledge + 5)
-              ]
-              if (coin - exposed) > 100 [ ;; Person does not believe the misinformation
-                set belief-misinformation (belief-misinformation - 5)
-              ]
-            ])
-        ]
-        [ ;; else-commands - This is any agent who is of middle to high or middle to low perceived and factual knowledge
-          (ifelse
-            for-topic = 1 [
-              if (coin - (exposed)) < 400 [ ;; Against and middle range perceived and factual knowledge means not likely to share or increase belief.
-                set belief-misinformation (belief-misinformation + 5)
-                set perceived-knowledge (perceived-knowledge + 5)
-              ]
-              if (coin - (exposed)) > 400 [
-                set belief-misinformation (belief-misinformation - 5) ;; Do not believe in the misinformation
-              ]
-            ]
-            for-topic = 2 [
-              if (coin - (exposed)) < 600 [ ;; For and middle range perceived and factual knowledge means not likely to share or increase belief.
-                set belief-misinformation (belief-misinformation + 5)
-                set perceived-knowledge (perceived-knowledge + 5)
-              ]
-              if (coin - (exposed)) >= 600 [
-                set belief-misinformation (belief-misinformation - 5) ;; Do not believe in the misinformation
-              ]
-            ]
-            for-topic = 0 [
-              if (coin - (exposed)) < 500 [ ;; Undecided and middle range perceived and factual knowledge means not likely to share or increase belief.
-                set belief-misinformation (belief-misinformation + 5)
-                set perceived-knowledge (perceived-knowledge + 5)
-              ]
-              if (coin - (exposed)) >= 500 [
-                set belief-misinformation (belief-misinformation - 5) ;; Do not believe in the misinformation
-              ]
-            ])
-        ])
-        ]
-    if belief-misinformation > 800 and share-misinformation? = false  and belief-information < 300[
-      set share-misinformation? true
-      set color red
+        set share-misinformation? true
+      ]
     ]
-    ;; Changing belief
-    if for-topic = 2 and belief-misinformation < 150 and belief-information > 500[
-      set for-topic 1
-    ]
-    if for-topic = 2 and belief-misinformation < 150 and belief-information < 500[
-      set for-topic 0
-    ]
-;;    if belief-misinformation <= 50 and share-misinformation? = true  [
-;;      set share-misinformation? false
-;;      set color blue
-;;  ]
   ]
+
 end
 
 to believe-and-share-model-true ;; We assume that you only share some information once.
-  ask turtles
-  [
-    if share-information? = false and count ( in-link-neighbors with [ share-information? = true ] ) > 0; ;; This agent is somewhat exposed to misinformation
-    [
-      set true-exposed? true
-      let true-exposed count ( in-link-neighbors with [ share-information? = true ] )
+  ask turtles [
 
-      ;; Now either the agent will just share (behavioural reaction) or they will increase belief and then share (cognitive followed by behavioural reaction)
+    if holding-true? = true and share-misinformation? = false and shared-true < 5[
 
-      ;; Share (path 3) -> As described in the literature their is a possibility that a user may simply share some information without increasing belief in the topic
-      ;; The sharing model says this is due to 1. Risk factors and 2. Exposure to misinformation
-      ;; To share misinformation without increasing belief in the topic one must be:
-      ;; Undecided & low factual and perceived knowledge
-      let coin random 1000
-;      (ifelse
-;        perceived-knowledge < 20 and factual-knowledge < 20 and for-topic = 0 and (coin - true-exposed) <= 200 [ ;; Low perceived & Factual knowledge & Undecided
-;         set share-information? true ;; 20% Chance of this category of person sharing without considering belief.
-;         set color green
-;        ]
-;        perceived-knowledge >= 20 and factual-knowledge >= 20 and for-topic != 2 and (coin - true-exposed) <= 25 and factual-knowledge < 80[
-;          set share-information? true
-;          set color green
-;        ])
+      set holding-true? false
 
-      ;; Belief (Path 1) - Here we go through all possible attributes of our agents and define how this effects their beleive
-      (ifelse
-        factual-knowledge >= 80 [ ;; High knowledge and high or low perceived knowledge for or against the topic
-        set belief-information (belief-information + 5) ;; Reduce belief in misinformation if well informed
+      ;; Calculate the probability of agent sharing to neighbours
+      set belief-information (perceived-knowledge + 0.4 * ( factual-knowledge - perceived-knowledge ) )
+
+      let coin (random 100) / 100
+
+      if coin <= belief-information [ ;; By some probability the agent shares information and neighbors are now holding!
+        ask in-link-neighbors [
+          set holding-true? true
+          set perceived-knowledge (perceived-knowledge + 0.001)
+          set factual-knowledge (factual-knowledge + 0.001)
+          set shared-true (shared-true + 1)
+          set color green
         ]
-        perceived-knowledge < 20 and factual-knowledge < 20 [ ;; Low perceived and factual knowledge
-          (ifelse
-            for-topic = 0 [ ;; Undecided and low factual and perceived knoweldge means you may or may not share misinformation
-              if (coin - true-exposed) <= 500 [
-                set belief-information (belief-information + 5)
-                set factual-knowledge (factual-knowledge + 5)
-              ]
-
-              if (coin - true-exposed) > 500 [ ;; Person does not believe the misinformation
-                set belief-information (belief-information - 5)
-              ]
-            ]
-            for-topic = 1 [ ;; For topic and low factual and perceived knowledge = Slightly more likely to beleive in topic
-              if (coin - true-exposed) <= 550 [
-                set belief-information (belief-information + 5)
-                set factual-knowledge (factual-knowledge + 5)
-              ]
-              if (coin - true-exposed) > 550 [ ;; Person does not believe the misinformation
-                set belief-information (belief-information - 5)
-              ]
-            ]
-            for-topic = 2 [ ;; Against topic with low factual and perceived knowledge = slightly less likely to b&s however still in the middle
-              if (coin - true-exposed) <= 450 [
-                set belief-information (belief-information + 5)
-                set factual-knowledge (factual-knowledge + 5)
-              ]
-              if (coin - true-exposed) > 450 [ ;; Person does not believe the misinformation
-                set belief-information (belief-information - 5)
-              ]
-            ])
-        ]
-        perceived-knowledge > 80 and factual-knowledge < 20 [ ;; High perceived and low factual knowledge
-          (ifelse
-            (for-topic = 0 or for-topic = 1)[ ;; Undecided or for and high perceived and low factual
-              if (coin - true-exposed) <= 850 [
-                set belief-information (belief-information + 5)
-                set factual-knowledge (factual-knowledge + 5)
-              ]
-
-              if (coin - true-exposed) > 850 [ ;; Person does not believe the misinformation
-                set belief-information (belief-information - 5)
-              ]
-            ]
-            for-topic = 2 [ ;; Against and low factual and perceived knoweldge means you may or may not share misinformation. Against the topic
-              if (coin + true-exposed) <= 150 [
-                set belief-information (belief-information + 5)
-                set factual-knowledge (factual-knowledge + 5)
-              ]
-              if (coin - true-exposed) > 150 [ ;; Person does not believe the misinformation
-                set belief-information (belief-information - 5)
-              ]
-            ])
-        ]
-        [ ;; else-commands - This is any agent who is of middle to high or middle to low perceived and factual knowledge
-          (ifelse
-            for-topic = 2 [
-              if (coin - (true-exposed)) < 300 [ ;; Against and middle range perceived and factual knowledge means not likely to share or increase belief.
-                set belief-information (belief-information + 5)
-                set factual-knowledge (factual-knowledge + 5)
-              ]
-              if (coin - (true-exposed)) >= 300 [
-                set belief-information (belief-information - 5) ;; Do not believe in the misinformation
-              ]
-            ]
-            for-topic = 1 [
-              if (coin - (true-exposed)) < 700 [ ;; For and middle range perceived and factual knowledge means not likely to share or increase belief.
-                set belief-information (belief-information + 5)
-                set factual-knowledge (factual-knowledge + 5)
-              ]
-              if (coin - (true-exposed)) >= 700 [
-                set belief-information (belief-information - 5) ;; Do not believe in the misinformation
-              ]
-            ]
-            for-topic = 0 [
-              if (coin - (true-exposed)) < 500 [ ;; Undecided and middle range perceived and factual knowledge means not likely to share or increase belief.
-                set belief-information (belief-information + 5)
-                set factual-knowledge (factual-knowledge + 5)
-              ]
-              if (coin - (true-exposed)) >= 500 [
-                set belief-information (belief-information - 5) ;; Do not believe in the misinformation
-              ]
-            ])
-        ])
-        ]
-    if belief-information > 800 and share-information? = false and belief-misinformation < 300[
-      set share-information? true
-      set color green
+        set share-information? true
+      ]
     ]
-
-    ;; Change belief
-    if for-topic = 1 and belief-information < 150 and belief-misinformation > 500 [
-      set for-topic 2
-    ]
-    if for-topic = 1 and belief-information < 150 and belief-misinformation < 500 [
-      set for-topic 0
-    ]
-;;    if belief-misinformation <= 50 and share-misinformation? = true  [
-;;      set share-misinformation? false
-;;      set color blue
-;;  ]
   ]
 end
 
@@ -595,7 +353,7 @@ Network Status
 Ticks
 % of nodes
 0.0
-1500.0
+250.0
 0.0
 100.0
 true
@@ -614,7 +372,7 @@ media-agents
 media-agents
 0
 100
-4.0
+44.0
 1
 1
 NIL
@@ -646,17 +404,15 @@ Mis-beliefe
 Tick
 Agents
 0.0
-1500.0
+250.0
 0.0
 100.0
 true
 true
 "" ""
 PENS
-"mis-belief" 1.0 0 -2674135 true "" "plot ((count (turtles with [belief-misinformation > 500]) / count turtles) * 100)"
-"true-belief" 1.0 0 -1184463 true "" "plot (((count turtles with [belief-information > 500]) / (count turtles)) * 100)"
-"no mis-belief" 1.0 0 -7500403 true "" "plot ((count (turtles with [belief-misinformation < 500]) / count turtles) * 100)"
-"no true-belief" 1.0 0 -955883 true "" "plot ((count (turtles with [belief-information < 500]) / count turtles) * 100)"
+"pen-0" 1.0 0 -2674135 true "" "plot (count turtles with [holding-mis? = true]) / (count turtles) * 100"
+"pen-1" 1.0 0 -11085214 true "plot (count turtles with [holding-true? = true]) / (count turtles) * 100" ""
 
 SWITCH
 25
@@ -699,8 +455,23 @@ SLIDER
 agents
 agents
 0
+5000
+1047.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+265
+34
+437
+67
+high-p-low-f
+high-p-low-f
+0
 1500
-235.0
+210.0
 1
 1
 NIL
